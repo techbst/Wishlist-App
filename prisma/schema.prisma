@@ -1,0 +1,161 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Shop {
+  id          String             @id @default(cuid())
+  shopDomain  String             @unique
+  installedAt DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  wishlists   CustomerWishlist[]
+  events      AnalyticsEvent[]
+}
+
+model CustomerWishlist {
+  id         String          @id @default(cuid())
+  shopId     String
+  customerId String
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  shop       Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items      WishlistItem[]
+  shares     WishlistShare[]
+
+  @@unique([shopId, customerId])
+  @@index([shopId, updatedAt])
+}
+
+model WishlistItem {
+  id            String           @id @default(cuid())
+  wishlistId    String
+  variantKey    String
+  productId     String
+  variantId     String?
+  productHandle String?
+  productTitle  String?
+  variantTitle  String?
+  productUrl    String?
+  productImage  String?
+  price         String?
+  compareAtPrice String?
+  available     Boolean          @default(true)
+  addedAt       DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  wishlist      CustomerWishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, variantKey])
+  @@index([productId])
+  @@index([wishlistId, addedAt])
+}
+
+model WishlistShare {
+  id         String           @id @default(cuid())
+  wishlistId String
+  token      String           @unique
+  expiresAt  DateTime?
+  createdAt  DateTime         @default(now())
+  wishlist   CustomerWishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  @@index([wishlistId, createdAt])
+}
+
+model AnalyticsEvent {
+  id         String   @id @default(cuid())
+  shopId     String
+  customerId String?
+  sessionId  String?
+  eventType  String
+  productId  String?
+  variantId  String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+  shop       Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, eventType, createdAt])
+  @@index([shopId, productId, createdAt])
+  @@index([shopId, customerId])
+}
+
+model WishlistSettings {
+  shop                 String   @id
+  enabled              Boolean  @default(true)
+  buttonLabel          String   @default("Save to wishlist")
+  accentColor          String   @default("#FF5C01")
+  textColor            String   @default("#20352b")
+  iconColor            String   @default("#FF5C01")
+  toastMessage         String   @default("Added to your wishlist")
+  productButtonDisplay String   @default("both")
+  zIndex               Int      @default(20)
+  showOnProductPages   Boolean  @default(true)
+  showOnCollectionPages Boolean @default(true)
+  guestWishlists       Boolean  @default(true)
+  customerWishlists    Boolean  @default(true)
+  showOnProductCards   Boolean  @default(true)
+  iconStyle            String   @default("heart")
+  cardStyle            String   @default("floating")
+  productButtonPosition String  @default("product-info")
+  showWishlistLink     Boolean  @default(false)
+  wishlistSharing      Boolean  @default(true)
+  pageHeading          String   @default("My wishlist")
+  emptyMessage         String   @default("Your wishlist is empty.")
+  keepInWishlistAfterCart Boolean @default(true)
+  customization        String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model WishlistEvent {
+  id           String   @id @default(cuid())
+  shop         String
+  eventType    String
+  productId    String
+  productTitle String?
+  productHandle String?
+  sessionKey   String?
+  customerId   String?
+  createdAt    DateTime @default(now())
+
+  @@index([shop, createdAt])
+  @@index([shop, productId])
+}
+
+model WebhookReceipt {
+  id         String   @id
+  shop       String
+  topic      String
+  receivedAt DateTime @default(now())
+
+  @@index([shop, receivedAt])
+  @@index([shop, topic])
+}

@@ -1,0 +1,22 @@
+<section class="wlapp-themed-page" data-wishlist-page>
+  <div class="wlapp-themed-page__header">
+    <div>
+      <p class="wlapp-themed-page__eyebrow">SAVED FOR LATER</p>
+      <h1>{{ block.settings.heading }}</h1>
+      <p data-wlapp-page-summary>Loading your saved items…</p>
+    </div>
+    <a class="wlapp-button" href="{{ routes.root_url }}pages/wishlist">Open full wishlist</a>
+  </div>
+  <div class="wlapp-themed-grid" data-wlapp-page-grid></div>
+</section>
+{% schema %}
+{
+  "name": "Wishlist page content",
+  "target": "section",
+  "javascript": "wishlist.js",
+  "stylesheet": "wishlist.css",
+  "settings": [
+    { "type": "text", "id": "heading", "label": "Heading", "default": "My wishlist" }
+  ]
+}
+{% endschema %}

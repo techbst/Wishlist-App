@@ -1,0 +1,14 @@
+<div class="wlapp-page-entry">
+  <a class="wlapp-button" href="{{ routes.root_url }}pages/wishlist">{{ block.settings.label }}</a>
+</div>
+{% schema %}
+{
+  "name": "Wishlist page link",
+  "target": "section",
+  "javascript": "wishlist.js",
+  "stylesheet": "wishlist.css",
+  "settings": [
+    { "type": "text", "id": "label", "label": "Link label", "default": "View my wishlist" }
+  ]
+}
+{% endschema %}

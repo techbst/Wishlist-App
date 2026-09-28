@@ -1,0 +1,17 @@
+{% if block.settings.product_page and product %}
+<div class="wlapp-embed" data-wishlist-embed data-product-id="{{ product.id }}" data-variant-title="{{ product.selected_or_first_available_variant.title | escape }}" data-available="{{ product.selected_or_first_available_variant.available }}" data-product-handle="{{ product.handle }}" data-product-title="{{ product.title | escape }}" data-product-image="{{ product.featured_image | image_url: width: 800 | escape }}" data-label="{{ block.settings.label | escape }}" data-color="{{ block.settings.color }}">
+</div>
+{% endif %}
+{% schema %}
+{
+  "name": "Wishlist",
+  "target": "body",
+  "javascript": "wishlist.js",
+  "stylesheet": "wishlist.css",
+  "settings": [
+    { "type": "text", "id": "label", "label": "Button label", "default": "Save to wishlist" },
+    { "type": "color", "id": "color", "label": "Accent color", "default": "#FF5C01" },
+    { "type": "checkbox", "id": "product_page", "label": "Show on product pages", "default": true }
+  ]
+}
+{% endschema %}
