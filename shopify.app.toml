@@ -2,7 +2,7 @@
 
 client_id = "1ea8ad25843eb03aebb8caf4f4cccde0"
 name = "Wishlist"
-application_url = "https://example.com"
+application_url = "https://wishlist-app-eight-lovat.vercel.app"
 embedded = true
 
 [access_scopes]
@@ -42,7 +42,7 @@ api_version = "2026-10"
   compliance_topics = [ "shop/redact" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://wishlist-app-eight-lovat.vercel.app/auth/callback" ]
 
 [build]
 automatically_update_urls_on_dev = true
