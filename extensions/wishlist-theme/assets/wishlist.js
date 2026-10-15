@@ -1,14 +1,35 @@
 (function () {
-  const STORAGE_KEY=()=>`wishlist_app:v1:${window.Shopify?.shop||location.hostname}`;
+  if (window.__wlappLoaded) return;
+  window.__wlappLoaded = true;
+  let activeConfig = {};
+  let stateRevision = 0;
+  let activeMutations = 0;
+  let customerScope = 'unverified';
+  let shopCurrency = window.Shopify?.currency?.active;
+  let shopScope = window.Shopify?.shop || location.hostname;
+  const pendingItems = new Set();
+  const STORAGE_KEY = () => `wishlist_app:v2:${shopScope}:${customerScope}`;
   const heartIcon = '<svg class="wlapp-heart-svg" width="1em" height="1em" viewBox="0 0 50 50" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M25 39.7l-.6-.5C11.5 28.7 8 25 8 19c0-5 4-9 9-9 4.1 0 6.4 2.3 8 4.1 1.6-1.8 3.9-4.1 8-4.1 5 0 9 4 9 9 0 6-3.5 9.7-16.4 20.2l-.6.5zM17 12c-3.9 0-7 3.1-7 7 0 5.1 3.2 8.5 15 18.1 11.8-9.6 15-13 15-18.1 0-3.9-3.1-7-7-7-3.5 0-5.4 2.1-6.9 3.8L25 17.1l-1.1-1.3C22.4 14.1 20.5 12 17 12z" fill="currentColor"/></svg>';
   const icons = { heart: [heartIcon, heartIcon], star: ['☆', '★'], bookmark: ['▱', '▰'], spark: ['✧', '✦'] };
   const rootPath=()=>window.Shopify?.routes?.root||'/';
   const endpoint = () => `${rootPath()}apps/wishlist?format=json`;
   const normalizeId = (id, type = 'Product') => { const value = String(id || ''); return value ? (value.startsWith('gid://') ? value : `gid://shopify/${type}/${value}`) : ''; };
-  const readSaved = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY()) || '{}'); } catch { return {}; } };
-  const writeSaved = (items) => localStorage.setItem(STORAGE_KEY(), JSON.stringify(items));
-  const sessionKey = () => { let value = localStorage.getItem('wishlist_app:session'); if (!value) { value = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; localStorage.setItem('wishlist_app:session', value); } return value; };
-  const getVariantId = (root) => document.querySelector('[name="id"]')?.value || root.dataset.variantId;
+  const canonicalKey = (item) => normalizeId(item.variantId, 'ProductVariant') || normalizeId(item.productId);
+  const normalizeItems = (items) => Object.fromEntries(Object.values(items || {}).filter((item) => item && item.productId).map((item) => [canonicalKey(item), { ...item, title: item.productTitle || item.title, handle: item.productHandle || item.handle }]));
+  const readSaved = () => { try { return normalizeItems(JSON.parse(localStorage.getItem(STORAGE_KEY()) || '{}')); } catch { return {}; } };
+  const writeSaved = (items) => {
+    localStorage.setItem(STORAGE_KEY(), JSON.stringify(normalizeItems(items)));
+    stateRevision++;
+    document.dispatchEvent(new CustomEvent('wlapp:change'));
+  };
+  const sessionKey = () => { const key = `${STORAGE_KEY()}:session`; let value = sessionStorage.getItem(key); if (!value) { value = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; sessionStorage.setItem(key, value); } return value; };
+  const getVariantId = (root) => {
+    if (root.matches('[data-wishlist-product-button], [data-wishlist-embed]')) {
+      const section = root.closest('.shopify-section, [data-product-info], product-info');
+      return section?.querySelector('form[action*="/cart/add"] [name="id"]')?.value || root.dataset.variantId;
+    }
+    return root.dataset.variantId;
+  };
   const itemKey = (root) => normalizeId(getVariantId(root), 'ProductVariant') || normalizeId(root.dataset.productId);
   const surface = (config, name) => { try { const customization = typeof config.customization === 'string' ? JSON.parse(config.customization || '{}') : (config.customization || {}); return customization[name] || {}; } catch { return {}; } };
 
@@ -46,28 +67,35 @@
       if (iconNode) iconNode.innerHTML = saved ? icon[1] : icon[0];
       if (labelNode) labelNode.textContent = saved ? (root.dataset.addedLabel || 'Saved to wishlist') : label;
     };
-    const refresh=()=>render(Boolean(readSaved()[itemKey(root)]));
+    const refresh=()=>render(Boolean(readSaved()[itemKey(root)]), pendingItems.has(itemKey(root)));
+    document.addEventListener('wlapp:change', refresh);
     refresh();
     document.querySelectorAll('[name="id"], select[name^="options"], [data-option-selector]').forEach((selector) => selector.addEventListener('change', refresh));
     document.addEventListener('variant:change', refresh);
     button.addEventListener('click', async () => {
-      const key=itemKey(root);
-      const saved=readSaved();
-      const wasSaved = Boolean(saved[key]);
-      const next = { ...saved };
-      if (wasSaved) delete next[key]; else next[key] = { ...productPayload(root), title: root.dataset.productTitle, handle: root.dataset.productHandle };
-      writeSaved(next);
-      updateCount();
-      render(!wasSaved, true);
-      const response = await send({ action: wasSaved ? 'remove' : 'add', eventType: wasSaved ? 'wishlist_remove' : 'wishlist_add', ...productPayload(root) });
-      if (response && !response.ok) { writeSaved(saved); updateCount(); refresh(); } else { render(!wasSaved, false); showToast(root.dataset.toast || (wasSaved ? 'Removed from your wishlist' : 'Added to your wishlist'), root.dataset.zIndex); }
+      const key = itemKey(root);
+      if (pendingItems.has(key)) return;
+      const wasSaved = Boolean(readSaved()[key]);
+      const payload = productPayload(root);
+      pendingItems.add(key);
+      refresh();
+      try {
+        const response = await send({ action: wasSaved ? 'remove' : 'add', eventType: wasSaved ? 'wishlist_remove' : 'wishlist_add', ...payload });
+        if (!response.ok) throw new Error('Could not save your change. Please try again.');
+        const latest = readSaved();
+        if (wasSaved) delete latest[key]; else latest[key] = { ...payload, title: root.dataset.productTitle, handle: root.dataset.productHandle };
+        writeSaved(latest);
+        showToast(wasSaved ? 'Removed from your wishlist' : (root.dataset.toast || 'Added to your wishlist'), root.dataset.zIndex);
+      } catch (error) { showToast(error.message, root.dataset.zIndex); }
+      finally { pendingItems.delete(key); document.dispatchEvent(new CustomEvent('wlapp:change')); }
+
     });
   }
 
   function showToast(message, zIndex) {
     if (!message) return;
     let toast = document.querySelector('[data-wlapp-toast]');
-    if (!toast) { toast = document.createElement('div'); toast.dataset.wlappToast = 'true'; toast.className = 'wlapp-toast'; document.body.appendChild(toast); }
+    if (!toast) { toast = document.createElement('div'); toast.setAttribute('role', 'status'); toast.setAttribute('aria-live', 'polite'); toast.dataset.wlappToast = 'true'; toast.className = 'wlapp-toast'; document.body.appendChild(toast); }
     toast.textContent = message;
     toast.style.zIndex = String(zIndex || 20);
     toast.classList.add('is-visible');
@@ -93,6 +121,7 @@
     root.dataset.label=cardConfig.label||config.buttonLabel||'Save to wishlist';
     root.innerHTML = `<button type="button" class="wlapp-button" data-wishlist-button><span class="wlapp-icon" data-wishlist-icon aria-hidden="true">${heartIcon}</span><span data-wishlist-label>Save to wishlist</span></button>`;
     if (window.getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    card.classList.add('wlapp-card-container');
     card.appendChild(root);
     init(root);
   }
@@ -105,7 +134,7 @@
     // recommended product cards should still be processed normally.
     if (currentProductHandle && match[1] === currentProductHandle) return;
     const card = link.closest('li, article, [data-product-card], .card-wrapper, .product-card, .grid__item');
-    if (!card || card.querySelector('.wlapp-card-root') || card.dataset.wlappPending === 'true') return;
+    if (!card || card.closest('[data-wishlist-page]') || card.querySelector('.wlapp-card-root') || card.dataset.wlappPending === 'true') return;
     card.dataset.wlappPending = 'true';
     try {
       const response = await fetch(`${rootPath()}products/${match[1]}.js`);
@@ -188,14 +217,29 @@
     }
   }
 
-  function mergeServerItems(config) {
-    if (!config.customerId || !Array.isArray(config.items)) return;
-    const local = readSaved();
-    const serverKeys = new Set(config.items.map((item) => normalizeId(item.variantId || item.productId, item.variantId ? 'ProductVariant' : 'Product')));
-    const guestOnly = Object.entries(local).filter(([key]) => !serverKeys.has(key));
-    for (const [, item] of guestOnly) if (item.productId) send({ action: 'add', eventType: 'wishlist_merge', ...item });
-    for (const item of config.items) local[normalizeId(item.variantId || item.productId, item.variantId ? 'ProductVariant' : 'Product')] = { ...item, title: item.productTitle, handle: item.productHandle };
-    writeSaved(local);
+  async function mergeServerItems(config) {
+    shopScope = config.shop || shopScope;
+    customerScope = config.customerId ? `customer:${config.customerId}` : 'guest';
+    if (!config.customerId) return;
+    const server = normalizeItems(config.items);
+    const guestKey = `wishlist_app:v2:${shopScope}:guest`;
+    // Only explicitly guest-owned saves may be transferred on login. Never import
+    // the old unowned v1 cache or another customer's cached wishlist.
+    if (config.customerWishlists !== false && surface(config, 'general').mergeGuestWishlists !== false) {
+      let guest = {};
+      try { guest = normalizeItems(JSON.parse(localStorage.getItem(guestKey) || '{}')); } catch { /* Empty guest cache. */ }
+      for (const [key, item] of Object.entries(guest)) {
+        if (!server[key]) {
+          const response = await send({ action: 'add', eventType: 'wishlist_merge', ...item });
+          if (!response.ok) continue;
+          server[key] = item;
+        }
+        delete guest[key];
+        localStorage.setItem(guestKey, JSON.stringify(guest));
+      }
+    }
+    // Server removals win over stale cached items instead of resurrecting them.
+    writeSaved(server);
   }
 
   function updateCount() { const count = Object.keys(readSaved()).length; document.querySelectorAll('[data-wlapp-count]').forEach((node) => { if (node.textContent !== String(count)) node.textContent = String(count); node.closest('.wlapp-count-bubble')?.classList.toggle('is-empty', count === 0); }); }
@@ -282,67 +326,136 @@
     }
   }
 
-  async function setupThemedWishlistPage(root) {
+  const catalogRequests = new Map();
+  function currentProduct(handle) {
+    if (!catalogRequests.has(handle)) {
+      catalogRequests.set(handle, fetch(`${rootPath()}products/${encodeURIComponent(handle)}.js`, { cache: 'no-store' })
+        .then(async (response) => ({ status: response.status, product: response.ok ? await response.json() : null }))
+        .catch(() => ({ status: 0, product: null })));
+    }
+    return catalogRequests.get(handle);
+  }
+
+  async function removeSavedItem(item) {
+    activeMutations++;
+    try {
+      const response = await send({ action: 'remove', productId: item.productId, variantId: item.variantId });
+      if (!response.ok) throw new Error('Could not remove this item. Please try again.');
+      const latest = readSaved();
+      delete latest[canonicalKey(item)];
+      writeSaved(latest);
+    } finally { activeMutations--; }
+  }
+
+  async function addSavedItemToCart(item) {
+    activeMutations++;
+    try {
+      const result = await fetch(`${rootPath()}cart/add.js`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id: String(item.variantId).split('/').pop(), quantity: 1 }] }) });
+      const body = await result.json().catch(() => ({}));
+      if (!result.ok) throw new Error(body.description || 'Could not add this item. Please try again.');
+      send({ action: 'analytics', eventType: 'wishlist_move_to_cart', productId: item.productId, variantId: item.variantId });
+      send({ action: 'analytics', eventType: 'wishlist_cart_success', productId: item.productId, variantId: item.variantId });
+      await refreshCartCount().catch(() => {});
+      if (activeConfig.keepInWishlistAfterCart === false) {
+        try { await removeSavedItem(item); }
+        catch { return 'Added to cart. Could not remove from wishlist; please try Remove.'; }
+      }
+      return 'Added to cart';
+    } finally { activeMutations--; }
+  }
+
+  function setupThemedWishlistPage(root) {
     if (!root || root.dataset.wlappPageReady === 'true') return;
-    root.dataset.wlappPageReady = 'true';
     const grid = root.querySelector('[data-wlapp-page-grid]');
     const summary = root.querySelector('[data-wlapp-page-summary]');
     if (!grid) return;
-    const saved = readSaved();
-    const response = await fetch(endpoint(), { credentials: 'same-origin' }).catch(() => null);
-    const serverConfig = response?.ok ? await response.json().catch(() => ({})) : {};
-    const pageConfig = surface(serverConfig, 'wishlistPage');
-    root.style.setProperty('--wlapp-page-accent', pageConfig.accentColor || serverConfig.accentColor || '#FF5C01');
-    root.style.setProperty('--wlapp-page-text', pageConfig.textColor || serverConfig.textColor || '#202223');
+    root.dataset.wlappPageReady = 'true';
+    const pageConfig = surface(activeConfig, 'wishlistPage');
+    root.style.setProperty('--wlapp-page-accent', pageConfig.accentColor || activeConfig.accentColor || '#FF5C01');
+    root.style.setProperty('--wlapp-page-text', pageConfig.textColor || activeConfig.textColor || '#202223');
     root.dataset.cardRadius = pageConfig.cardRadius || 'medium';
-    Object.values(serverConfig.items || {}).forEach((item) => {
-      const key = item.variantId || item.productId;
-      if (key) saved[key] = { ...item, title: item.productTitle, handle: item.productHandle };
-    });
-    writeSaved(saved);
-    await Promise.all(Object.values(saved).filter((item) => !item.productImage && item.handle).map(async (item) => {
-      const productResponse = await fetch(`${rootPath()}products/${encodeURIComponent(item.handle)}.js`).catch(() => null);
-      const product = productResponse?.ok ? await productResponse.json().catch(() => null) : null;
-      if (product?.featured_image) item.productImage = product.featured_image;
-    }));
-    writeSaved(saved);
-    const entries = Object.values(saved);
-    if (summary) summary.textContent = `${entries.length} saved item${entries.length === 1 ? '' : 's'}`;
-    if (!entries.length) {
-      grid.innerHTML = '<p class="wlapp-empty">Your wishlist is empty.</p>';
-      return;
-    }
+    let revision = 0;
     const safe = (value) => String(value || '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-    grid.innerHTML = entries.map((item, index) => `<article class="wlapp-themed-item" data-wlapp-item-index="${index}"><a href="/products/${encodeURIComponent(item.handle || '')}"><img src="${safe(item.productImage)}" alt=""></a><div class="wlapp-themed-item__body"><a href="/products/${encodeURIComponent(item.handle || '')}">${safe(item.title || 'Saved item')}</a><div class="wlapp-themed-item__actions"><button type="button" class="primary" data-wlapp-cart>Add to cart</button><button type="button" data-wlapp-remove>Remove</button></div></div></article>`).join('');
-    grid.querySelectorAll('[data-wlapp-item-index]').forEach((card) => {
-      const item = entries[Number(card.dataset.wlappItemIndex)];
-      card.querySelector('[data-wlapp-cart]').addEventListener('click', async () => {
-        const variantId = Number(String(item.variantId || '').split('/').pop());
-        if (!variantId) return;
-        const button = card.querySelector('[data-wlapp-cart]');
-        button.disabled = true;
-        const result = await fetch('/cart/add.js', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ id: variantId, quantity: 1 }] }) }).catch(() => null);
-        button.textContent = result?.ok ? 'Added' : 'Unavailable';
-        if (result?.ok) await refreshCartCount();
-        button.disabled = false;
+    const render = async () => {
+      const currentRevision = ++revision;
+      const entries = Object.values(readSaved());
+      if (summary) summary.textContent = `${entries.length} saved item${entries.length === 1 ? '' : 's'}`;
+      if (!entries.length) { grid.innerHTML = `<p class="wlapp-empty">${safe(pageConfig.emptyDescription || activeConfig.emptyMessage || 'Your wishlist is empty.')}</p>`; return; }
+      const hydrated = await Promise.all(entries.map(async (item) => {
+        const handle = item.productHandle || item.handle;
+        if (!handle) return { ...item, available: false };
+        const { status, product } = await currentProduct(handle);
+        if (!product) return { ...item, available: false, catalogError: status !== 404 };
+        const variant = product.variants?.find((candidate) => normalizeId(candidate.id, 'ProductVariant') === normalizeId(item.variantId, 'ProductVariant'));
+        return { ...item, title: product.title, handle: product.handle, productImage: variant?.featured_image?.src || product.featured_image || '', variantTitle: variant?.title, price: variant?.price, available: Boolean(variant?.available) };
+      }));
+      if (currentRevision !== revision) return;
+      grid.innerHTML = hydrated.map((item, index) => {
+        const price = Number.isFinite(item.price) ? new Intl.NumberFormat(document.documentElement.lang || 'en', { style: 'currency', currency: shopCurrency || 'USD' }).format(item.price / 100) : '';
+        return `<article class="wlapp-themed-item" data-wlapp-item-index="${index}"><a href="${rootPath()}products/${encodeURIComponent(item.handle || '')}">${item.productImage ? `<img src="${safe(item.productImage)}" alt="${safe(item.title)}" loading="lazy">` : ''}</a><div class="wlapp-themed-item__body"><a href="${rootPath()}products/${encodeURIComponent(item.handle || '')}">${safe(item.title || item.productTitle || 'Saved item')}</a>${item.variantTitle && item.variantTitle !== 'Default Title' ? `<p>${safe(item.variantTitle)}</p>` : ''}${price ? `<p>${safe(price)}</p>` : ''}<div class="wlapp-themed-item__actions"><button type="button" class="primary" data-wlapp-cart ${item.available ? '' : 'disabled'}>${item.available ? 'Add to cart' : (item.catalogError ? 'Temporarily unavailable' : 'Unavailable')}</button><button type="button" data-wlapp-remove>Remove</button></div><p role="status" data-wlapp-status></p></div></article>`;
+      }).join('');
+      grid.querySelectorAll('[data-wlapp-item-index]').forEach((card) => {
+        const item = hydrated[Number(card.dataset.wlappItemIndex)];
+        const cart = card.querySelector('[data-wlapp-cart]');
+        const remove = card.querySelector('[data-wlapp-remove]');
+        const status = card.querySelector('[data-wlapp-status]');
+        remove.addEventListener('click', async () => {
+          remove.disabled = true;
+          try { await removeSavedItem(item); }
+          catch (error) { status.textContent = error.message; remove.disabled = false; }
+        });
+        cart.addEventListener('click', async () => {
+          cart.disabled = true;
+          remove.disabled = true;
+          status.textContent = 'Adding to cart…';
+          try {
+            status.textContent = await addSavedItemToCart(item);
+          } catch (error) { status.textContent = error.message; }
+          finally { cart.disabled = false; remove.disabled = false; }
+        });
       });
-      card.querySelector('[data-wlapp-remove]').addEventListener('click', () => {
-        const key = item.variantId || item.productId;
-        delete saved[key];
-        writeSaved(saved);
-        send({ action: 'remove', productId: item.productId, variantId: item.variantId });
-        card.remove();
-        updateCount();
-        if (!grid.querySelector('[data-wlapp-item-index]')) grid.innerHTML = '<p class="wlapp-empty">Your wishlist is empty.</p>';
-      });
+      updateCount();
+    };
+    const pageStatus = root.querySelector('[data-wlapp-page-status]');
+    const clear = root.querySelector('[data-wlapp-clear]');
+    clear?.addEventListener('click', async () => {
+      clear.disabled = true;
+      activeMutations++;
+      try {
+        const response = await send({ action: 'clear' });
+        if (!response.ok) throw new Error('Could not clear your wishlist. Please try again.');
+        writeSaved({});
+      } catch (error) { if (pageStatus) pageStatus.textContent = error.message; }
+      finally { clear.disabled = false; activeMutations--; }
     });
-    updateCount();
+    const share = root.querySelector('[data-wlapp-share]');
+    if (share) share.hidden = activeConfig.wishlistSharing === false;
+    share?.addEventListener('click', async () => {
+      share.disabled = true;
+      try {
+        const response = await send({ action: 'share' });
+        const body = await response.json();
+        if (!response.ok || !body.shareToken) throw new Error('Sign in to share your wishlist.');
+        const url = `${location.origin}${rootPath()}apps/wishlist/share/${encodeURIComponent(body.shareToken)}`;
+        try { await navigator.clipboard.writeText(url); if (pageStatus) pageStatus.textContent = 'Wishlist link copied'; }
+        catch { if (pageStatus) pageStatus.textContent = `Share this link: ${url}`; }
+      } catch (error) { if (pageStatus) pageStatus.textContent = error.message; }
+      finally { share.disabled = false; }
+    });
+    document.addEventListener('wlapp:change', render);
+    render();
   }
 
   function boot() {
-    fetch(endpoint()).then((response) => response.ok ? response.json() : {}).catch(() => ({})).then((config) => {
+    fetch(endpoint(), { cache: 'no-store' }).then((response) => { if (!response.ok) throw new Error('Wishlist could not load. Please refresh to try again.'); return response.json(); }).then(async (config) => {
       if (config.enabled === false) return;
-      mergeServerItems(config);
+      if (!shopCurrency) {
+        const cart = await fetch(`${rootPath()}cart.js`).then((response) => response.ok ? response.json() : null).catch(() => null);
+        shopCurrency = cart?.currency;
+      }
+      activeConfig = config;
+      document.addEventListener('wlapp:change', updateCount);
+      await mergeServerItems(config);
       keepSingleProductButton();
       addHeaderLink(config);
       document.querySelectorAll('[data-wishlist-page]').forEach((root) => setupThemedWishlistPage(root));
@@ -378,6 +491,23 @@
       let scheduled = false;
       const observer = new MutationObserver(() => { if (scheduled) return; scheduled = true; requestAnimationFrame(() => { scheduled = false; addHeaderLink(config); addCardButtons(config); updateCount(); }); });
       observer.observe(document.body, { childList: true, subtree: true });
+      window.addEventListener('storage', (event) => {
+        if (event.key === STORAGE_KEY()) document.dispatchEvent(new CustomEvent('wlapp:change'));
+      });
+      window.addEventListener('pageshow', (event) => { if (event.persisted) location.reload(); });
+      window.addEventListener('focus', async () => {
+        if (pendingItems.size || activeMutations) return;
+        const revision = stateRevision;
+        const latest = await fetch(endpoint(), { cache: 'no-store' }).then((response) => response.ok ? response.json() : null).catch(() => null);
+        if (!latest || pendingItems.size || activeMutations || revision !== stateRevision) return;
+        activeConfig = latest;
+        await mergeServerItems(latest);
+        catalogRequests.clear();
+        document.dispatchEvent(new CustomEvent('wlapp:change'));
+      });
+    }).catch((error) => {
+      document.querySelectorAll('[data-wlapp-page-summary]').forEach((node) => { node.textContent = error.message; });
+      showToast(error.message);
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

@@ -68,3 +68,10 @@
 .wlapp-product-control, .wlapp-product-control .wlapp-button { position: static !important; inset: auto !important; }
 .wlapp-header-link { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
 .wlapp-header-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 4px; }
+
+/* Keep card controls in a local stacking context beneath the theme header. */
+.wlapp-card-container, .wlapp-themed-item { isolation: isolate; }
+.wlapp-card-root { z-index: 1 !important; }
+.wlapp-themed-item { position: relative; z-index: 0; }
+.wlapp-themed-item__actions button:disabled { opacity: .6; cursor: not-allowed; }
+.wlapp-themed-item [data-wlapp-status] { min-height: 1.4em; font-size: .875em; }
