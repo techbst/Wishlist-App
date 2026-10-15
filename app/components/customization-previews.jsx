@@ -29,6 +29,8 @@ export const customizationDefaults = {
   },
   productPage: {
     enabled: true,
+    addedLabel: "Saved to wishlist",
+    background: "#FFFFFF",
     placement: "above-cart",
     display: "both",
     icon: "heart",
@@ -137,6 +139,10 @@ function PreviewButton({
   background = "#fff",
   showBorder = true,
   added = false,
+  addedLabel = "Saved to wishlist",
+  borderColor,
+  radius,
+  fullWidth = false,
 }) {
   return (
     <div
@@ -145,10 +151,16 @@ function PreviewButton({
         "--preview-icon": color,
         "--preview-text": textColor,
         "--preview-background": background,
+        background,
+        color: textColor,
+        borderColor: borderColor || color,
+        borderRadius: radius,
+        width: fullWidth ? "100%" : undefined,
+        boxSizing: "border-box",
       }}
     >
-      <span aria-hidden="true">{icon === "heart" ? <HeartIcon /> : iconFor(icon, added)}</span>
-      <span>{added ? "Saved to wishlist" : label}</span>
+      <span aria-hidden="true" style={{ color }}>{icon === "heart" ? <HeartIcon /> : iconFor(icon, added)}</span>
+      <span>{added ? addedLabel : label}</span>
     </div>
   );
 }
@@ -213,16 +225,28 @@ export function ProductCardPreview({ settings }) {
 
 export function ProductPagePreview({ settings }) {
   const placement = settings.placement || "above-cart";
-  const button = (
-    <PreviewButton
-      display={settings.display}
-      icon={settings.icon}
-      label={settings.label}
-            color={settings.iconColor || settings.accentColor || ORANGE}
-            textColor={settings.textColor || "#202223"}
-            background="#fff"
-            showBorder={settings.showBorder}
-          />
+  const radius = { square: 0, medium: 10, full: 999 }[settings.radius] ?? 10;
+  const spacing = (value) => Math.min(64, Math.max(0, Number(value) || 0));
+  const button = settings.enabled !== false && (
+    <div className="preview-product-control" style={{
+      width: "100%",
+      textAlign: settings.alignment,
+      marginTop: spacing(settings.spacingTop),
+      marginBottom: spacing(settings.spacingBottom),
+    }}>
+      <PreviewButton
+        display={settings.display}
+        icon={settings.icon}
+        label={settings.label}
+        color={settings.iconColor || settings.accentColor || ORANGE}
+        textColor={settings.textColor || "#202223"}
+        background={settings.background || "#fff"}
+        borderColor={settings.accentColor || ORANGE}
+        radius={radius}
+        fullWidth={settings.width === "full"}
+        showBorder={settings.showBorder}
+      />
+    </div>
   );
   return (
     <div className="preview-stage preview-product-page">
@@ -259,7 +283,7 @@ export function ProductPagePreview({ settings }) {
           <div className="preview-cart-button">Add to cart</div>
           {placement === "below-cart" && button}
           <small className="preview-placement-note">
-            Wishlist block placement: {settings.placement.replaceAll("-", " ")}
+            Wishlist block placement: {placement.replaceAll("-", " ")}
           </small>
         </div>
       </div>

@@ -652,6 +652,18 @@ function ProductPageSettings({ value, update, reset }) {
           />,
         )}
         {field(
+          "Saved label",
+          "Text shown after a shopper saves the selected variant.",
+          <Input value={value.addedLabel} onChange={(event) => update("addedLabel", event.target.value)} />,
+        )}
+        {field(
+          "Icon",
+          "Choose a symbol that matches your storefront.",
+          <Select value={value.icon} onChange={(event) => update("icon", event.target.value)} options={[
+            ["heart", "Heart"], ["bookmark", "Bookmark"], ["star", "Star"], ["spark", "Spark"],
+          ]} />,
+        )}
+        {field(
           "Alignment",
           "Align with the product information column.",
           <Select
@@ -681,6 +693,18 @@ function ProductPageSettings({ value, update, reset }) {
         title="Appearance"
         description="Match the product action to your storefront palette."
       >
+        {field(
+          "Background",
+          "Button surface before the product is saved.",
+          <Color value={value.background} onChange={(event) => update("background", event.target.value)} />,
+        )}
+        {field(
+          "Corner shape",
+          "Match the shape of your Add to cart button.",
+          <Select value={value.radius} onChange={(event) => update("radius", event.target.value)} options={[
+            ["square", "Square"], ["medium", "Rounded"], ["full", "Pill"],
+          ]} />,
+        )}
         {field(
           "Accent color",
           "Color used for the saved state and border.",

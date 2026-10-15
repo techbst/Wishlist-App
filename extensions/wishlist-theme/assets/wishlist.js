@@ -38,12 +38,13 @@
     button.classList.add(`wlapp-display-${root.dataset.display || 'both'}`);
     const render=(saved, loading=false) => {
       button.disabled = loading;
+      button.setAttribute('aria-busy', String(loading));
       button.classList.toggle('wlapp-saved', saved);
       button.classList.toggle('wlapp-loading', loading);
       button.setAttribute('aria-pressed', String(saved));
       button.setAttribute('aria-label', saved ? 'Remove from wishlist' : label);
       if (iconNode) iconNode.innerHTML = saved ? icon[1] : icon[0];
-      if (labelNode) labelNode.textContent = saved ? 'Saved to wishlist' : label;
+      if (labelNode) labelNode.textContent = saved ? (root.dataset.addedLabel || 'Saved to wishlist') : label;
     };
     const refresh=()=>render(Boolean(readSaved()[itemKey(root)]));
     refresh();
@@ -122,9 +123,23 @@
 
   function keepSingleProductButton() {
     const controls = document.querySelectorAll('[data-wishlist-product-button], [data-wishlist-embed]');
-    controls.forEach((control, index) => {
-      if (index > 0) control.remove();
+    const primary = document.querySelector('[data-wishlist-product-button]') || controls[0];
+    controls.forEach((control) => {
+      if (control !== primary) control.remove();
     });
+  }
+
+  function styleProductControl(root, values) {
+    const spacing = (value) => Number.isFinite(Number(value)) ? Math.min(64, Math.max(0, Number(value))) : 12;
+    const radius = { square: '0px', medium: '10px', full: '999px' }[values.radius] || '10px';
+    root.classList.add('wlapp-product-control');
+    root.dataset.width = values.width === 'full' ? 'full' : 'auto';
+    root.dataset.background = values.background || '#FFFFFF';
+    root.dataset.addedLabel = values.addedLabel || 'Saved to wishlist';
+    root.style.setProperty('--wlapp-alignment', { left: 'flex-start', center: 'center', right: 'flex-end' }[values.alignment] || 'flex-start');
+    root.style.setProperty('--wlapp-spacing-top', `${spacing(values.spacingTop)}px`);
+    root.style.setProperty('--wlapp-spacing-bottom', `${spacing(values.spacingBottom)}px`);
+    root.style.setProperty('--wlapp-radius', radius);
   }
 
   function setupProductEmbed(embed, config) {
@@ -139,7 +154,8 @@
     embed.dataset.color = pageConfig.accentColor || config.accentColor || '#FF5C01';
     embed.dataset.textColor = pageConfig.textColor || config.textColor || '#202223'; embed.dataset.iconColor = pageConfig.iconColor || config.iconColor || config.accentColor || '#FF5C01'; embed.dataset.display = pageConfig.display || config.productButtonDisplay || 'both'; embed.dataset.toast = config.toastMessage || ''; embed.dataset.zIndex = config.zIndex || '20';
     embed.innerHTML = `<button type="button" class="wlapp-button" data-wishlist-button><span class="wlapp-icon" data-wishlist-icon aria-hidden="true">${heartIcon}</span><span data-wishlist-label></span></button>`;
-    placeProductControl(embed, embed.dataset.wlappPosition || 'above-cart');
+    styleProductControl(embed, pageConfig);
+    placeProductControl(embed, pageConfig.placement || embed.dataset.wlappPosition || 'above-cart');
     init(embed);
   }
 
@@ -148,7 +164,7 @@
     control.style.setProperty('inset', 'auto', 'important');
     control.style.setProperty('transform', 'none', 'important');
     const info = document.querySelector('[data-product-info], .product__info-wrapper, .product__info-container, .product-info');
-    const form = document.querySelector('form[action*="/cart/add"]');
+    const form = info?.querySelector('form[action*="/cart/add"]') || document.querySelector('form[action*="/cart/add"]');
     if (!info || !control) return;
     const title = info.querySelector('h1, [class*="product__title"], [class*="product-title"]');
     const price = info.querySelector('[class*="price"], .price');
@@ -307,7 +323,9 @@
       keepSingleProductButton();
       addHeaderLink(config);
       document.querySelectorAll('[data-wishlist-page]').forEach((root) => setupThemedWishlistPage(root));
-      if (config.showOnProductPages !== false) {
+      const pageEnabled = config.showOnProductPages !== false && surface(config, 'productPage').enabled !== false;
+      document.querySelectorAll('[data-wishlist-product-button], [data-wishlist-embed]').forEach((root) => { root.hidden = !pageEnabled; });
+      if (pageEnabled) {
         const cardConfig = surface(config, 'productCard');
         const pageConfig = surface(config, 'productPage');
         document.querySelectorAll('[data-wishlist-root]').forEach((root) => {
@@ -325,7 +343,10 @@
           root.dataset.display = values.display || config.productButtonDisplay || 'both';
           root.dataset.toast = config.toastMessage || '';
           root.dataset.zIndex = config.zIndex || '20';
-          if (isProductPage) placeProductControl(root, config.productButtonPosition || 'above-cart');
+          if (isProductPage) {
+            styleProductControl(root, values);
+            placeProductControl(root, values.placement || config.productButtonPosition || 'above-cart');
+          }
           init(root);
         });
         document.querySelectorAll('[data-wishlist-embed]').forEach((embed) => setupProductEmbed(embed, config));
