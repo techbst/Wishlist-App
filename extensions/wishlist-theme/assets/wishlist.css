@@ -62,3 +62,9 @@
   .wlapp-product-control .wlapp-button { transition: none; }
   .wlapp-product-control .wlapp-button:active { transform: none; }
 }
+
+/* Product save actions scroll with their product section, including sticky themes. */
+.wlapp-product-normal-flow { position: static !important; inset: auto !important; }
+.wlapp-product-control, .wlapp-product-control .wlapp-button { position: static !important; inset: auto !important; }
+.wlapp-header-link { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+.wlapp-header-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 4px; }

@@ -177,6 +177,15 @@
     else if (placement === 'below-cart' && form?.parentElement) insertAfter(form);
     else if (placement === 'above-cart' && form?.parentElement) form.parentElement.insertBefore(control, form);
     else if (!info.contains(control)) info.appendChild(control);
+    // A static button still sticks when its product-information parent is sticky.
+    // Only release ancestors of this control, never the site's sticky header.
+    let ancestor = control.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      if (getComputedStyle(ancestor).position === 'sticky') {
+        ancestor.classList.add('wlapp-product-normal-flow');
+      }
+      ancestor = ancestor.parentElement;
+    }
   }
 
   function mergeServerItems(config) {
@@ -189,7 +198,7 @@
     writeSaved(local);
   }
 
-  function updateCount() { const count = Object.keys(readSaved()).length; document.querySelectorAll('[data-wlapp-count]').forEach((node) => { node.textContent = String(count); node.closest('.wlapp-count-bubble')?.classList.toggle('is-empty', count === 0); }); }
+  function updateCount() { const count = Object.keys(readSaved()).length; document.querySelectorAll('[data-wlapp-count]').forEach((node) => { if (node.textContent !== String(count)) node.textContent = String(count); node.closest('.wlapp-count-bubble')?.classList.toggle('is-empty', count === 0); }); }
 
   async function refreshCartCount() {
     const response = await fetch(`${rootPath()}cart.js`, { credentials: 'same-origin' }).catch(() => null);
@@ -204,11 +213,25 @@
   }
 
   function addHeaderLink(config) {
-    const header = document.querySelector('.header__icons, [class*="header__icons"]');
-    if (!header) return;
     const general = surface(config, 'general');
-    if (config.showWishlistLink !== true) return;
-    let link = document.querySelector('[data-wlapp-header-link], .wlapp-header-link');
+    const enabled = typeof general.showWishlistLink === 'boolean'
+      ? general.showWishlistLink : config.showWishlistLink === true;
+    if (!enabled) {
+      document.querySelectorAll('[data-wlapp-header-link]').forEach((link) => link.remove());
+      return;
+    }
+    let headers = [...document.querySelectorAll('.header__icons, [data-header-icons], .header__actions, header-actions, .header-actions')];
+    if (!headers.length) {
+      const cart = document.querySelector('header a[href$="/cart"], .shopify-section-header a[href$="/cart"]');
+      if (cart?.parentElement) headers = [cart.parentElement];
+    }
+    // Avoid placing duplicate links in nested action containers.
+    headers = headers.filter((header) => !headers.some((other) => other !== header && header.contains(other)));
+    headers.forEach((header) => addHeaderLinkToContainer(header, general));
+  }
+
+  function addHeaderLinkToContainer(header, general) {
+    let link = header.querySelector('[data-wlapp-header-link], .wlapp-header-link');
     const pagePath = String(general.wishlistPagePath || '/pages/wishlist').trim();
     const safePath = `/${pagePath.replace(/^\/+/, '').replace(/[?#].*$/, '')}`;
     if (!link) {
@@ -220,14 +243,14 @@
     link.href = `${rootPath()}${safePath.replace(/^\//, '')}`;
     const customIcon = String(general.headerIcon || '');
     const icon = link.querySelector('.icon-wishlist');
-    if (customIcon && icon?.tagName === 'SVG') {
+    if (customIcon && icon?.localName === 'svg') {
       const image = document.createElement('img');
       image.className = 'icon icon-wishlist';
       image.alt = '';
       image.src = customIcon;
       icon.replaceWith(image);
-    } else if (!customIcon && icon?.tagName === 'IMG') {
-      const svg = document.createElement('svg');
+    } else if (!customIcon && icon?.localName === 'img') {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.className.baseVal = 'icon icon-wishlist';
       svg.setAttribute('aria-hidden', 'true');
       svg.setAttribute('viewBox', '0 0 50 50');
@@ -250,7 +273,7 @@
       heart.setAttribute('stroke-width', strokeWidth);
     }
     const position = ['start', 'middle', 'end'].includes(general.headerIconPosition) ? general.headerIconPosition : 'end';
-    if (link.dataset.wlappHeaderPosition !== position) {
+    if (link.parentElement !== header || link.dataset.wlappHeaderPosition !== position) {
       const siblings = [...header.children].filter((child) => child !== link);
       if (position === 'start') header.prepend(link);
       else if (position === 'middle') header.insertBefore(link, siblings[Math.ceil(siblings.length / 2)] || null);
